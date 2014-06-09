@@ -2,7 +2,7 @@ Septimus
 ========
 
 [Septimus](https://en.wikipedia.org/wiki/Septimus_%28praenomen%29) is a driver
-board to control large seven segments displays. It is designed for four
+board to control large (2.3 inches) seven segments displays. It is designed for four
 characters and has its own step-up converter to produce the large voltage
 needed by the large seven segments displays.
 
@@ -12,6 +12,17 @@ the two-wire interface of the microcontroller.
 All the components are commonly available discrete through-hole parts.
 
 <img src="https://raw.githubusercontent.com/fakufaku/Septimus/master/board.jpg" width=1024>
+
+Because of the size of the 7-segments, I couldn't use the free version of Eagle
+CAD and decided to take the chance to learn its free alternative, the [gEDA suite](http://geda-project.org/).  
+I found this [tutorial](http://wiki.geda-project.org/geda:gsch2pcb_tutorial)
+particularly useful in my learning process. The combo of gschem/pcb is quite
+powerful and has a simplicity that Eagle CAD lacks. However, the workflow to go
+from schematics to PCB and keep consistency is very cumbersome and error prone.
+Making custom parts is also not very practical. As a conclusion, it was a good
+experience and is definitely an advantage to know an EDA without the
+limitations of Eagle CAD with respect to board size and multiple layers, but I
+will stick to Eagle for my simple projects.
 
 Bill of material
 ----------------
