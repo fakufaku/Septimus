@@ -11,7 +11,7 @@ the two-wire interface of the microcontroller.
 
 All the components are commonly available discrete through-hole parts.
 
-<img src="https://github.com/fakufaku/Septimus/raw/board.jpg" width=1024>
+<img src="https://raw.githubusercontent.com/fakufaku/Septimus/master/board.jpg" width=1024>
 
 Bill of material
 ----------------
