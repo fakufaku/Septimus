@@ -1,0 +1,42 @@
+
+CC=avr-gcc
+PROGRAMMER=usbtiny
+PORT=usb
+CPU=attiny2313
+
+NAME=septimus
+
+SOURCE=${NAME}.c
+OBJECT=${NAME}.o
+ELF=${NAME}.elf
+HEX=${NAME}.hex
+
+LFUSE=0x42
+HFUSE=0xDF
+EFUSE=0xFF
+
+object: ${SOURCE}
+	${CC} -mmcu=${CPU} -c ${SOURCE}
+
+elf: object
+	${CC} -mmcu=${CPU} -o ${ELF} ${OBJECT}
+
+hex: elf
+	avr-objcopy -j .text -j .data -O ihex ${ELF} ${HEX}
+
+avrdude: hex
+	avrdude -c ${PROGRAMMER} -P ${PORT} -p ${CPU} -U flash:w:${HEX}:i
+
+rfuse:
+	avrdude -c ${PROGRAMMER} -p ${CPU} -U lfuse:r:-:h 2> /dev/null
+	avrdude -c ${PROGRAMMER} -p ${CPU} -U hfuse:r:-:h 2> /dev/null
+	avrdude -c ${PROGRAMMER} -p ${CPU} -U efuse:r:-:h 2> /dev/null
+
+wfuse:
+	avrdude -c ${PROGRAMMER} -p ${CPU} -U lfuse:w:${LFUSE}:m 2> /dev/null
+	avrdude -c ${PROGRAMMER} -p ${CPU} -U hfuse:w:${HFUSE}:m 2> /dev/null
+	avrdude -c ${PROGRAMMER} -p ${CPU} -U efuse:w:${EFUSE}:m 2> /dev/null
+
+
+clean:
+	rm -rf ${ELF} ${OBJECT} ${HEX}
