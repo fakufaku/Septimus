@@ -6,22 +6,28 @@ CPU=attiny2313
 
 NAME=septimus
 
-SOURCE=${NAME}.c
-OBJECT=${NAME}.o
+SRCS = ${NAME}.c usiTwiSlave.c 
+OBJS = $(SRCS:.c=.o)
 ELF=${NAME}.elf
 HEX=${NAME}.hex
 
-LFUSE=0x42
+LFUSE=0x64
 HFUSE=0xDF
 EFUSE=0xFF
 
-object: ${SOURCE}
-	${CC} -mmcu=${CPU} -c ${SOURCE}
 
-elf: object
-	${CC} -mmcu=${CPU} -o ${ELF} ${OBJECT}
+%.o : %.c
+	@echo "[$(TARGET)] Compiling:" $@...
+	#${CC} $(CXXFLAGS) -MMD -MF $(@:%.o=%.d) -c $< -o $@
+	${CC} -Os -mmcu=${CPU} -c $<
 
-hex: elf
+elf: ${OBJS}
+	${CC} -mmcu=${CPU} -o ${ELF} ${OBJS}
+
+size: ${ELF}
+	avr-size -C --mcu=${CPU} ${ELF}
+
+hex: elf size
 	avr-objcopy -j .text -j .data -O ihex ${ELF} ${HEX}
 
 avrdude: hex
@@ -39,4 +45,4 @@ wfuse:
 
 
 clean:
-	rm -rf ${ELF} ${OBJECT} ${HEX}
+	rm -rf ${ELF} ${OBJS} ${HEX}

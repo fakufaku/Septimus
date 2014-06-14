@@ -7,44 +7,74 @@
 * ----------------------------------------------------------------------------
 */
 
+/*
+ * This is the firmware of the Septimus big 7 segment display.
+ * All code and schematics available online
+ * https://github.com/fakufaku/Septimus
+ */
+
 #include <avr/sleep.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
+
+#include <stdlib.h>
+
+#include "usiTwiSlave.h"
 
 // Allows to disable interrupt in some parts of the code
 #define ENTER_CRIT()    {char volatile saved_sreg = SREG; cli()
 #define LEAVE_CRIT()    SREG = saved_sreg;}
 
-// The number displayed
-unsigned long number = 0;
-unsigned int dig = 1;
+// the different timer0 frequencies
+#define TIMER0_CLKDIV_4kHz (1 << CS00)
+#define TIMER0_CLKDIV_488Hz (1 << CS01)
+#define TIMER0_CLKDIV_61Hz (1 << CS01) | (1 << CS00)
+#define TIMER0_CLKDIV_15Hz (1 << CS02)
+#define TIMER0_CLKDIV_4Hz (1 << CS02) | (1 << CS00)
 
-// short timer
-#define SHORT_TIMER_LENGTH 4
-unsigned char short_timer = 0;
+// The different interrupts to enable
+#define SET_OCR0A_INT() TIMSK |= (1 << OCIE0A)
+#define UNSET_OCR0A_INT() TIMSK &= ~(1 << OCIE0A)
+#define TIMER0_STOP() TCCR0B = 0
+#define TIMER0_SET_RATE(R) TCCR0B = R
 
-// LED on/off array
-unsigned char LED_array = 0;
+#define FIRMWARE_REVISION 1
+#define SLAVE_ADDRESS 50
 
-// 7-segment mapping array
-unsigned char numbers[11] = { 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, 0x00 };
+#define DIGIT_NUMBER 4
+
+#define DEFAULT_BRIGHTNESS 0xFE
+
+// the bit buffer
+uint8_t buffer[4] = {0x0, 0x0, 0x0, 0x0};
+
+// we use a timer to rotate the digits
+uint8_t digit_counter = 0;
+
+// brightness register
+uint8_t brightness = DEFAULT_BRIGHTNESS;
+
+// TWI commands
+#define CMD_01_SEGMENTS 0x01
+#define CMD_02_BRIGHTNESS 0x02
+#define CMD_03_RATE 0x03
 
 // define the digits pins
-#define DIG1_PORT PORTD
-#define DIG1_DDR  DDRD
-#define DIG1_PIN  0
+#define DIG4_PORT PORTD
+#define DIG4_DDR  DDRD
+#define DIG4_PIN  0
 
-#define DIG2_PORT PORTD
-#define DIG2_DDR  DDRD
-#define DIG2_PIN  1
-
-#define DIG3_PORT PORTA
-#define DIG3_DDR  DDRA
+#define DIG3_PORT PORTD
+#define DIG3_DDR  DDRD
 #define DIG3_PIN  1
 
-#define DIG4_PORT PORTA
-#define DIG4_DDR  DDRA
-#define DIG4_PIN  0
+#define DIG2_PORT PORTA
+#define DIG2_DDR  DDRA
+#define DIG2_PIN  1
+
+#define DIG1_PORT PORTA
+#define DIG1_DDR  DDRA
+#define DIG1_PIN  0
 
 // define the segments pins
 #define SEG_A_PORT PORTD
@@ -79,8 +109,17 @@ unsigned char numbers[11] = { 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x
 #define SEG_DP_DDR  DDRD
 #define SEG_DP_PIN  4
 
+// turn off all digits
+void digits_all_off(void)
+{
+  DIG1_PORT &= ~_BV(DIG1_PIN);
+  DIG2_PORT &= ~_BV(DIG2_PIN);
+  DIG3_PORT &= ~_BV(DIG3_PIN);
+  DIG4_PORT &= ~_BV(DIG4_PIN);
+}
+
 // light up a digit
-void light_digit(int n)
+void light_digit(uint8_t n)
 {
   switch (n)
   {
@@ -101,30 +140,13 @@ void light_digit(int n)
       break;
 
     default:
-      DIG1_PORT &= ~_BV(DIG1_PIN);
-      DIG2_PORT &= ~_BV(DIG2_PIN);
-      DIG3_PORT &= ~_BV(DIG3_PIN);
-      DIG4_PORT &= ~_BV(DIG4_PIN);
+      digits_all_off();
   }
 }
 
 // set the segments for a given number
-void set_number(int n, int dp)
+void set_segments(uint8_t bits)
 {
-  unsigned char bits = 0;
-
-  // convert number to bit pattern using table lookup
-  if (n >= 0 && n <= 9)
-    bits = numbers[n];
-  else
-    bits = 0;
-
-  // set the decimal point if needed
-  if (dp)
-    bits |= 0x80;
-  else
-    bits &= ~0x80;
-
   //A
   if (bits & 0x1)
     SEG_A_DDR |= _BV(SEG_A_PIN);
@@ -168,38 +190,99 @@ void set_number(int n, int dp)
   }
   else
   {
-    //SEG_DP_DDR &= ~_BV(SEG_DP_PIN);
     SEG_DP_DDR |= _BV(SEG_DP_PIN);
     SEG_DP_PORT &= ~_BV(SEG_DP_PIN);
   }
+}
 
+// process the TWI command
+void processTWI( void )
+{
+  uint8_t b,c;
+
+  // receive the command
+  b = usiTwiReceiveByte();
+
+  switch (b) {
+    case CMD_01_SEGMENTS: // save brightness
+      // receive the 4 digits
+      for (c = 0 ; c < DIGIT_NUMBER ; c++)
+        buffer[c] = usiTwiReceiveByte();
+      break;
+
+    case CMD_02_BRIGHTNESS:
+      // receive the brightness byte
+      brightness = usiTwiReceiveByte();  // update the output compare A with new value
+      if (brightness == 0xFF)
+        UNSET_OCR0A_INT();
+      else
+        SET_OCR0A_INT();
+      break;
+
+    case CMD_03_RATE:
+      c = usiTwiReceiveByte();
+      switch (c)
+      {
+        case 0x00:
+          TIMER0_STOP();
+          break;
+
+        case 0x01:
+          TIMER0_SET_RATE(TIMER0_CLKDIV_4kHz);
+          break;
+
+        case 0x02:
+          TIMER0_SET_RATE(TIMER0_CLKDIV_488Hz);
+          break;
+
+        case 0x03:
+          TIMER0_SET_RATE(TIMER0_CLKDIV_61Hz);
+          break;
+      }
+      break;
+
+    default:
+      // nothing to do
+      break;
+  }
+}
+
+// The output compare A interrupt to turn off the digit
+SIGNAL(TIMER0_COMPA_vect)
+{
+  ENTER_CRIT();
+
+  // turn off all digits
+  digits_all_off();
+
+  LEAVE_CRIT();
 }
 
 // The timer overflow interrupt routine
 SIGNAL(TIMER0_OVF_vect)
 {
-  short_timer = (short_timer + 1) % SHORT_TIMER_LENGTH;
-  if (short_timer == 0)
-  {
-    // update the state
-    /*
-    number = (number + 1) % 10;
-    dig = (dig + 1) % 4;
-    light_digit(0);
-    light_digit(dig+1);
-    set_number(number, 0);
-    */
-    number = (number + 1) % 10000;
-  }
+  ENTER_CRIT();
+
+  // turn off all digits
+  digits_all_off();
+
+  // increment the digit to display
+  digit_counter = (digit_counter+1) % DIGIT_NUMBER;
+
+  // set the segments
+  set_segments(buffer[digit_counter]);
+
+  // turn digit on
+  light_digit(digit_counter+1);
+
+  // set the time the digit should light up
+  OCR0A = brightness;
+
+  LEAVE_CRIT();
 }
 
 int main()
 {
-  int i, j;
-
-  // enable interrupts
-  sei();
-
   // set digits as output and disable them all
   DIG1_DDR |= _BV(DIG1_PIN);
   DIG2_DDR |= _BV(DIG2_PIN);
@@ -215,7 +298,6 @@ int main()
   SEG_E_DDR &= ~_BV(SEG_E_PIN);
   SEG_F_DDR &= ~_BV(SEG_F_PIN);
   SEG_G_DDR &= ~_BV(SEG_G_PIN);
-  SEG_DP_DDR &= ~_BV(SEG_DP_PIN);
   
   SEG_A_PORT &= ~_BV(SEG_A_PIN);
   SEG_B_PORT &= ~_BV(SEG_B_PIN);
@@ -224,28 +306,29 @@ int main()
   SEG_E_PORT &= ~_BV(SEG_E_PIN);
   SEG_F_PORT &= ~_BV(SEG_F_PIN);
   SEG_G_PORT &= ~_BV(SEG_G_PIN);
+
+  // set DP as output and to ground
+  SEG_DP_DDR |= _BV(SEG_DP_PIN);
   SEG_DP_PORT &= ~_BV(SEG_DP_PIN);
 
   // set up timer 1 as system clock
-  TCCR0B = (1 << CS02) | (1 << CS00); // T1 clock to clk/1024
-  TIMSK = (1 << TOIE0);   // set the overflow interrupt
+  TIMSK = (1 << TOIE0);         // overflow interrupts
+  TCCR0B = TIMER0_CLKDIV_488Hz; // default blink rate at 488Hz
+
+  
+  // init the TWI slave
+  usiTwiSlaveInit(SLAVE_ADDRESS);
+
+  // enable interrupts
+  sei();
 
   // The infinite loop
   while (1)
   {
-    unsigned long n = number;
-    for (i = 4 ; i >= 1 ; i--)
+    // process Twi commands
+    while (usiTwiDataInReceiveBuffer())
     {
-      light_digit(i);
-      if (i == 2)
-        set_number(n % 10, 1);
-      else
-        set_number(n % 10, 0);
-      for (j = 0 ; j < 10 ; j++)
-        ;
-      n /= 10;
-      set_number(10, 0);
-      light_digit(0);
+      processTWI();
     }
   }
 

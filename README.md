@@ -49,10 +49,102 @@ Bill of material
 * 4x 2.3inch 7-segments displays
 * 1x 2.1mm barrel jack
 
+Etch the board
+--------------
+
+The top and bottom mask files are `Septimus_mask_top.pdf` and `Septimus_mask_bot.pdf`,
+respectively. The mask are mirrored so that the printed side goes directly onto the copper.
+There are alignment marks and some text to avoid mistakes.
+
+The board is double-sided and thus not trivial for home etching. However, there are only 
+four tracks on the top layer and it is thus conceivable to make the PCB single layer
+and manually patch it with four wires.
+
+In addition, because of the difficulty of making metallized holes at home, a number
+of jumper wires are required (7) as shown on `Septimus_info.pdf`. In the same file,
+the drill bits sizes are described.
+
+Alternatively, the gerber files are available in the folder `gerber` for sending
+to a board house.
+
+Firmware
+--------
+
+The firmware can be burnt using an ISP programmer (such as the usbtiny).
+
+    cd firmware/
+    make avrdude
+
+If you do not use the usbtiny, edit the Makefile `PROGRAMMER` variable to
+reflect the device you use.
+
+The fuse settings are left to factory default (Low:0x64, High:0xDF, Ext:0xFF).
+
+Arduino library
+---------------
+
+### Install
+
+Copy `SeptimusLib/` into your local Arduino `libraries` folder. Restart
+the Arduino IDE and try one of the examples.
+
+### Example sketch.
+
+    #include <Wire.h>
+    #include <Septimus.h>
+
+    Septimus display = Septimus(SLAVE_ADDRESS);
+
+    unsigned int counter = 0;
+
+    void setup() {
+      display.begin();
+    }
+
+    void loop() {
+      // print current counter value
+      display.print(counter, DEC);
+      display.writeDisplay();
+
+      // increment and wait a second
+      counter++;
+      delay(1000);
+    }
+
+### Adjust brightness of display
+
+It is possible to set the brightness of the display by using
+
+    display.setBrightness(b)
+
+where `b` is a value between 0 (dimmest) to 255 (brightest).
+
+### Adjust blinking rate of display
+
+The seven segment works by displaying each digit individually
+but at high frequency so that we have the illusion of seeing
+all digit lit up simultaneously. The blinking rate can be
+changed using the following code. The same command can be used
+to switch off the display.
+
+    display.setRate(RATE_488Hz) // 488 Hz (default)
+    display.setRate(RATE_4kHz)  // 4 kHz
+    display.setRate(RATE_61Hz)  // 61 Hz
+    display.setRate(RATE_STOP)  // display is off
+
+Note that the only rate that gives smooth display and
+allows for adjusting the brightness is 488 Hz, the default.
+
+At 4kHz, the display is somewhat brighter, but only works
+with brightness set to 255.
+
 License
 -------
 
-2014 (c) Robin Scheibler aka FakuFaku
+### Schematics, PCB, firmware
+
+
+(c) 2014, Robin Scheibler aka FakuFaku
 
     "THE BEER-WARE LICENSE" (Revision 42):
     <fakufaku@gmail.com> wrote this file. As long as you retain this notice you
@@ -60,3 +152,11 @@ License
     this stuff is worth it, you can buy me a beer in return -- Robin Scheibler
 
 ![](https://upload.wikimedia.org/wikipedia/commons/d/d5/BeerWare_Logo.svg)
+
+With the exception of the USI TWI Slave driver code by Donald R. Blake which is GPL.
+
+### Arduino library
+
+The arduino library was adapted from the excellent [Adafruit LED
+Backpack](https://github.com/adafruit/Adafruit-LED-Backpack-Library) library
+which is released under MIT or BSD license, depending on where you look.
